@@ -18,7 +18,9 @@ npx pst-md raw <id>                            # verbatim markdown source
 npx pst-md get <id>                            # metadata (title, timestamps)
 npx pst-md update <id> notes.md --key <editKey>
 npx pst-md delete <id> --key <editKey>         # URL becomes 410 Gone
-npx pst-md appearance                          # valid palette/font ids
+npx pst-md publish note.md --expires 1d --burn # lifetime + one-time note
+npx pst-md consume <id>                        # one-time read (ERASES burn notes)
+npx pst-md appearance                          # valid palette/font/code-theme ids
 ```
 
 - `--json` on any command for structured output; parse `editKey` from
@@ -32,11 +34,13 @@ npx pst-md appearance                          # valid palette/font ids
 import { createClient } from "pst-md";
 const pst = createClient();
 const note = await pst.create("---\ntitle: Hi\npalette: nord\n---\n# hello");
+// options: await pst.create(md, { expiresIn: "1d", burnAfterRead: true })
+// one-time read (erases burn notes): await pst.consume(id)
 // note.url, note.id, note.editKey (STORE IT)
 await pst.content(note.id);                  // raw markdown
 await pst.update(note.id, "# v2", note.editKey);
 await pst.delete(note.id, note.editKey);
-await pst.appearance();                      // valid palette/font ids
+await pst.appearance();                      // palettes, fonts, codeThemes
 ```
 
 Errors throw `PstError` with `.status`: `403` wrong key, `404` unknown,
@@ -49,13 +53,13 @@ Start the note content with:
 ```markdown
 ---
 title: Release notes
-palette: dracula
+palette: catppuccin
 font: lora
 ---
 # Body
 ```
 
-Keys: `title`, `palette` (alias `theme`, 72 options, auto light/dark),
+Keys: `title`, `palette` (alias `theme` — 20 theme families, each with a real light AND dark flavor), `code-theme` (alias `code` — pins the code-block syntax theme, e.g. dracula),
 `font` (19 options). Values resolve case-insensitively by id or label;
 unknown values are ignored. Authoritative ids: `npx pst-md appearance`,
 `GET https://pst.md/api/appearance`, or the MCP `list_appearance` tool.

@@ -11,6 +11,33 @@ function mockFetch(status: number, body: unknown, text = false) {
 }
 
 describe("PstClient", () => {
+  it("create passes lifecycle options through", async () => {
+    const fetch = mockFetch(201, {
+      id: "abc", editKey: "k", encrypted: false, expiresAt: 123, burnAfterRead: true,
+    });
+    const pst = createClient({ fetch });
+    const note = await pst.create("# hi", { expiresIn: "1d", burnAfterRead: true });
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      content: "# hi", expiresIn: "1d", burnAfterRead: true,
+    });
+    expect(note.burnAfterRead).toBe(true);
+    expect(note.expiresAt).toBe(123);
+  });
+
+  it("consume POSTs the one-time read endpoint", async () => {
+    const fetch = mockFetch(200, {
+      id: "abc", title: null, content: "# once", encrypted: false,
+      createdAt: 1, updatedAt: 1, burnAfterRead: true,
+    });
+    const pst = createClient({ fetch });
+    const note = await pst.consume("abc");
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(url)).toContain("/api/notes/abc/consume");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(note.content).toBe("# once");
+  });
+
   it("create posts content and derives the page url", async () => {
     const fetch = mockFetch(201, { id: "abc", editKey: "k", encrypted: false });
     const pst = createClient({ fetch });

@@ -1,6 +1,6 @@
 {
   "name": "pst-md",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "CLI + tiny zero-dependency client for pst.md — publish public markdown notes with instant shareable links; edit/delete via secret editKey. `npx pst-md publish note.md`.",
   "keywords": [
     "pst.md",

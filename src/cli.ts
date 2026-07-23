@@ -3,7 +3,9 @@
  * pst-md CLI — publish/read/update/delete pst.md notes from the terminal.
  *
  *   npx pst-md publish note.md        # or:  cat note.md | npx pst-md publish
+ *   npx pst-md publish note.md --expires 1d --burn
  *   npx pst-md raw <id>
+ *   npx pst-md consume <id>           # one-time read (burns burn-after-read notes)
  *   npx pst-md get <id>
  *   npx pst-md update <id> note.md --key <editKey>
  *   npx pst-md delete <id> --key <editKey>
@@ -18,7 +20,7 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createClient, PstError } from "./index.js";
+import { createClient, PstError, type ExpiresIn } from "./index.js";
 
 const HELP = `pst-md — public markdown notes on pst.md
 
@@ -26,13 +28,16 @@ Usage:
   pst-md publish [file]              Publish markdown (file or stdin) -> url + editKey
   pst-md get <id>                    Note metadata (title, timestamps)
   pst-md raw <id>                    Print the verbatim markdown source
+  pst-md consume <id>                Read once — ERASES a burn-after-read note
   pst-md update <id> [file] --key K  Replace content (file or stdin)
   pst-md delete <id> --key K         Delete permanently (URL becomes 410)
-  pst-md appearance                  List valid front-matter palette/font ids
+  pst-md appearance                  List valid palette/font/code-theme ids
   pst-md skill                       Print the bundled agent SKILL.md
   pst-md help                        This help
 
 Options:
+  --expires <t>        Lifetime for publish: 1h | 1d | 1w | 30d (default: never)
+  --burn               One-time note: self-destructs after the first read
   --key <editKey>      Edit key (env: PST_MD_EDIT_KEY)
   --base-url <origin>  Target deployment (env: PST_MD_BASE_URL, default https://pst.md)
   --json               Machine-readable JSON output
@@ -53,6 +58,8 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     options: {
       key: { type: "string" },
+      expires: { type: "string" },
+      burn: { type: "boolean", default: false },
       "base-url": { type: "string" },
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
@@ -79,11 +86,20 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "publish": {
-      const note = await pst.create(await readInput(args[0]));
+      const expires = values.expires;
+      if (expires && !["1h", "1d", "1w", "30d"].includes(expires)) {
+        throw new Error("--expires must be one of: 1h, 1d, 1w, 30d");
+      }
+      const note = await pst.create(await readInput(args[0]), {
+        ...(expires ? { expiresIn: expires as ExpiresIn } : {}),
+        ...(values.burn ? { burnAfterRead: true } : {}),
+      });
       out(note, () => {
         console.log(`url:     ${note.url}`);
         console.log(`id:      ${note.id}`);
         console.log(`editKey: ${note.editKey}   <- shown ONCE, store it`);
+        if (note.expiresAt) console.log(`expires: ${new Date(note.expiresAt).toISOString()}`);
+        if (note.burnAfterRead) console.log(`burn:    one-time note — the link works exactly once`);
       });
       break;
     }
@@ -102,6 +118,15 @@ async function main(): Promise<void> {
       process.stdout.write(await pst.content(args[0]));
       break;
     }
+    case "consume": {
+      if (!args[0]) throw new Error("usage: pst-md consume <id>  (erases a burn-after-read note)");
+      const note = await pst.consume(args[0]);
+      out(note, () => {
+        process.stdout.write(note.content);
+        if (note.burnAfterRead) console.error("\npst-md: note consumed — it is now erased for everyone");
+      });
+      break;
+    }
     case "update": {
       if (!args[0]) throw new Error("usage: pst-md update <id> [file] --key K");
       const note = await pst.update(args[0], await readInput(args[1]), key());
@@ -118,9 +143,11 @@ async function main(): Promise<void> {
       const catalog = await pst.appearance();
       out(catalog, () => {
         console.log(`palettes (${catalog.palettes.length}):`);
-        for (const p of catalog.palettes) console.log(`  ${p.id}  (${p.label}${p.isDark ? ", dark" : ", light"})`);
+        for (const p of catalog.palettes) console.log(`  ${p.id}  (${p.label})`);
         console.log(`fonts (${catalog.fonts.length}):`);
         for (const f of catalog.fonts) console.log(`  ${f.id}  (${f.label}, ${f.category})`);
+        console.log(`code themes (${catalog.codeThemes.length}):`);
+        for (const t of catalog.codeThemes) console.log(`  ${t.id}  (${t.label})`);
       });
       break;
     }

@@ -7,12 +7,27 @@
  * once and is the only way to update or delete a note — store it.
  */
 
+/** Note lifetimes accepted at publish. Omit for a note that never expires. */
+export type ExpiresIn = "1h" | "1d" | "1w" | "30d";
+
+/** Options for {@link PstClient.create}. */
+export interface CreateOptions {
+  /** Named lifetime after which the note is gone. */
+  expiresIn?: ExpiresIn;
+  /** One-time note: self-destructs after the first content read. */
+  burnAfterRead?: boolean;
+}
+
 /** Result of publishing a note. */
 export interface CreatedNote {
   id: string;
   /** Secret key required to update/delete. Returned only here — store it. */
   editKey: string;
   encrypted: boolean;
+  /** Epoch ms when the note expires, or null. */
+  expiresAt: number | null;
+  /** The note self-destructs after its first content read. */
+  burnAfterRead: boolean;
   /** Shareable page URL, derived from the client's baseUrl. */
   url: string;
 }
@@ -20,10 +35,25 @@ export interface CreatedNote {
 /** Note metadata (content lives at {@link PstClient.content}). */
 export interface NoteMeta {
   id: string;
+  /** Null for encrypted and for one-time (burn-after-read) notes. */
   title: string | null;
   encrypted: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Epoch ms when the note expires, or null. */
+  expiresAt: number | null;
+  burnAfterRead: boolean;
+}
+
+/** One-time read result from {@link PstClient.consume}. */
+export interface ConsumedNote {
+  id: string;
+  title: string | null;
+  content: string;
+  encrypted: boolean;
+  createdAt: number;
+  updatedAt: number;
+  burnAfterRead: boolean;
 }
 
 /** Note returned by {@link PstClient.update} (includes stored content). */
@@ -39,8 +69,11 @@ export interface AppearanceCatalog {
     resolution: string;
     example: string;
   };
-  palettes: Array<{ id: string; label: string; isDark: boolean }>;
+  /** Theme families — every palette has a real light AND dark flavor. */
+  palettes: Array<{ id: string; label: string }>;
   fonts: Array<{ id: string; label: string; category: string }>;
+  /** Shiki themes valid for the front-matter code-theme key. */
+  codeThemes: Array<{ id: string; label: string }>;
 }
 
 /** Error carrying the HTTP status and server message for failed calls. */
@@ -92,12 +125,17 @@ export class PstClient {
 
   /**
    * Publish a markdown note. Title/theme come from YAML front matter in the
-   * content (keys: title, palette, font) — see https://pst.md/skill.md.
+   * content (keys: title, palette, font, code-theme) — see
+   * https://pst.md/skill.md. Options add a lifetime or make it one-time.
    */
-  async create(content: string): Promise<CreatedNote> {
+  async create(content: string, options: CreateOptions = {}): Promise<CreatedNote> {
     const created = await this.json<Omit<CreatedNote, "url">>("/api/notes", {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        ...(options.expiresIn ? { expiresIn: options.expiresIn } : {}),
+        ...(options.burnAfterRead ? { burnAfterRead: true } : {}),
+      }),
     });
     return { ...created, url: this.pageUrl(created.id) };
   }
@@ -114,6 +152,19 @@ export class PstClient {
     );
     if (!response.ok) await fail(response);
     return response.text();
+  }
+
+  /**
+   * Read a note's content exactly once, CONSUMING it if it is a one-time
+   * (burn-after-read) note — the note is erased for everyone afterwards.
+   * The only way to read a plaintext burn note programmatically
+   * ({@link content} answers 403 for those).
+   */
+  consume(id: string): Promise<ConsumedNote> {
+    return this.json<ConsumedNote>(
+      `/api/notes/${encodeURIComponent(id)}/consume`,
+      { method: "POST" },
+    );
   }
 
   /** Replace a note's content. Requires the editKey from {@link create}. */
