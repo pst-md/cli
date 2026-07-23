@@ -30,15 +30,19 @@ node dist/cli.js raw <id> --password <password>                    # decrypts
 node dist/cli.js delete <id> --key <editKey>
 ```
 
-## Publish (maintainer)
+## Release (maintainer)
 
-`prepublishOnly` rebuilds, so a clean `npm publish` is enough:
+Releases publish from GitHub Actions via npm **OIDC trusted publishing** —
+no npm tokens, no local `npm publish`, no 2FA prompt. The trusted publisher
+is registered on npmjs.com (org `pst-md`, repo `cli`, workflow `release.yml`):
 
 ```bash
-npm version patch      # or minor / major — bumps package.json + tags
-npm publish            # requires npm 2FA; publishConfig.access is "public"
-git push --follow-tags
+npm version patch      # or minor / major — commits the bump + tags vX.Y.Z
+git push origin main --follow-tags
 ```
+
+The tag triggers `.github/workflows/release.yml`: `npm ci` + tests, a
+tag-matches-package.json check, then `npm publish` with provenance.
 
 Verify after: `npm view pst-md version` and `npx pst-md@latest help`.
 
@@ -51,9 +55,11 @@ Verify after: `npm view pst-md version` and `npx pst-md@latest help`.
   encryption format, mirror it here (and bump the envelope `v`), or cross-app
   decryption breaks.
 - **Public-repo git identity.** Commits here are authored by
-  `pst.md <dev@pst.md>` — set `git -c user.name=... -c user.email=...` per commit.
-  Do **not** add personal names/emails, and do **not** add any AI/assistant
-  co-author or session trailers. This is a public open-source repo.
+  `pst.md <dev@pst.md>` — the repo-local git config pins this (verify with
+  `git config user.email`; re-run `git config user.name "pst.md" &&
+  git config user.email dev@pst.md` after a fresh clone). Do **not** commit
+  with personal names/emails, and do **not** add any AI/assistant co-author
+  or session trailers. This is a public open-source repo.
 - The CLI/library speaks only the public notes API (`/api/notes`, `/n/<id>/raw`,
   `/api/appearance`). The browser-only sync-vault / folders / sharing features
   are **not** part of this package.
