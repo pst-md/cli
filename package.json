@@ -1,0 +1,58 @@
+{
+  "name": "pst-md",
+  "version": "0.1.1",
+  "description": "CLI + tiny zero-dependency client for pst.md — publish public markdown notes with instant shareable links; edit/delete via secret editKey. `npx pst-md publish note.md`.",
+  "keywords": [
+    "pst.md",
+    "markdown",
+    "notes",
+    "paste",
+    "pastebin",
+    "share",
+    "mcp"
+  ],
+  "license": "MIT",
+  "author": "pst.md <dev@pst.md> (https://pst.md)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pst-md/cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pst-md/cli/issues"
+  },
+  "homepage": "https://pst.md",
+  "type": "module",
+  "bin": {
+    "pst-md": "dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SKILL.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "prepublishOnly": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}
