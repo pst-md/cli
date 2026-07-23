@@ -4,8 +4,9 @@
  *
  *   npx pst-md publish note.md        # or:  cat note.md | npx pst-md publish
  *   npx pst-md publish note.md --expires 1d --burn
- *   npx pst-md raw <id>
- *   npx pst-md consume <id>           # one-time read (burns burn-after-read notes)
+ *   npx pst-md publish note.md --gen-password   # encrypt + print unlock link
+ *   npx pst-md raw <id> [--password P]
+ *   npx pst-md consume <id> [--password P]   # one-time read (burns the note)
  *   npx pst-md get <id>
  *   npx pst-md update <id> note.md --key <editKey>
  *   npx pst-md delete <id> --key <editKey>
@@ -13,14 +14,19 @@
  *   npx pst-md skill                  # print the bundled agent SKILL.md
  *
  * Options: --base-url <origin> (or PST_MD_BASE_URL), --key (or
- * PST_MD_EDIT_KEY), --json for machine-readable output.
+ * PST_MD_EDIT_KEY), --password / --gen-password, --json for machine output.
  */
 
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createClient, PstError, type ExpiresIn } from "./index.js";
+import {
+  createClient,
+  generatePassword,
+  PstError,
+  type ExpiresIn,
+} from "./index.js";
 
 const HELP = `pst-md — public markdown notes on pst.md
 
@@ -38,12 +44,16 @@ Usage:
 Options:
   --expires <t>        Lifetime for publish: 1h | 1d | 1w | 30d (default: never)
   --burn               One-time note: self-destructs after the first read
+  --password <p>       Encrypt on publish / decrypt on raw|consume (end-to-end)
+  --gen-password       Publish: encrypt with a fresh generated password
   --key <editKey>      Edit key (env: PST_MD_EDIT_KEY)
   --base-url <origin>  Target deployment (env: PST_MD_BASE_URL, default https://pst.md)
   --json               Machine-readable JSON output
 
-The editKey is printed once at publish — store it; it is the only way to
-edit or delete a note. Notes are public: never publish secrets.`;
+Encryption is end-to-end: the server stores only an opaque envelope. The
+password (and the #p= unlock link) never reach the server — lose them and the
+note is unrecoverable. The editKey is printed once at publish — store it; it is
+the only way to edit or delete a note. Plaintext notes are public.`;
 
 async function readInput(file: string | undefined): Promise<string> {
   if (file && file !== "-") return readFile(file, "utf8");
@@ -60,6 +70,8 @@ async function main(): Promise<void> {
       key: { type: "string" },
       expires: { type: "string" },
       burn: { type: "boolean", default: false },
+      password: { type: "string" },
+      "gen-password": { type: "boolean", default: false },
       "base-url": { type: "string" },
       json: { type: "boolean", default: false },
       help: { type: "boolean", default: false },
@@ -90,14 +102,24 @@ async function main(): Promise<void> {
       if (expires && !["1h", "1d", "1w", "30d"].includes(expires)) {
         throw new Error("--expires must be one of: 1h, 1d, 1w, 30d");
       }
+      if (values.password && values["gen-password"]) {
+        throw new Error("use either --password or --gen-password, not both");
+      }
+      const password =
+        values.password ?? (values["gen-password"] ? generatePassword() : undefined);
       const note = await pst.create(await readInput(args[0]), {
         ...(expires ? { expiresIn: expires as ExpiresIn } : {}),
         ...(values.burn ? { burnAfterRead: true } : {}),
+        ...(password ? { password } : {}),
       });
-      out(note, () => {
+      out({ ...note, password: password ?? null }, () => {
         console.log(`url:     ${note.url}`);
         console.log(`id:      ${note.id}`);
         console.log(`editKey: ${note.editKey}   <- shown ONCE, store it`);
+        if (note.encrypted && note.unlockUrl) {
+          console.log(`password: ${password}   <- decrypts this note`);
+          console.log(`link:    ${note.unlockUrl}   <- self-unlocking, share carefully`);
+        }
         if (note.expiresAt) console.log(`expires: ${new Date(note.expiresAt).toISOString()}`);
         if (note.burnAfterRead) console.log(`burn:    one-time note — the link works exactly once`);
       });
@@ -115,12 +137,14 @@ async function main(): Promise<void> {
     }
     case "raw": {
       if (!args[0]) throw new Error("usage: pst-md raw <id>");
-      process.stdout.write(await pst.content(args[0]));
+      process.stdout.write(
+        await pst.content(args[0], { password: values.password }),
+      );
       break;
     }
     case "consume": {
       if (!args[0]) throw new Error("usage: pst-md consume <id>  (erases a burn-after-read note)");
-      const note = await pst.consume(args[0]);
+      const note = await pst.consume(args[0], { password: values.password });
       out(note, () => {
         process.stdout.write(note.content);
         if (note.burnAfterRead) console.error("\npst-md: note consumed — it is now erased for everyone");

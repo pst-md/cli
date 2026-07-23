@@ -1,10 +1,11 @@
 # pst-md
 
-Tiny zero-dependency client for [pst.md](https://pst.md) — publish public
-markdown notes with instant shareable links. No accounts; a secret `editKey`
-(returned once at creation) is the only way to update or delete a note.
+Tiny zero-dependency client for [pst.md](https://pst.md) — publish public or
+**end-to-end-encrypted** markdown notes with instant shareable links. No
+accounts; a secret `editKey` (returned once at creation) is the only way to
+update or delete a note.
 
-Works anywhere `fetch` exists: Node ≥ 18, browsers, edge runtimes.
+Works anywhere `fetch` exists: Node ≥ 20, browsers, edge runtimes.
 
 ```bash
 npm install pst-md
@@ -37,10 +38,33 @@ await pst.delete(note.id, note.editKey);
 Errors throw `PstError` with `.status` (`403` wrong key, `404` unknown,
 `410` deleted, `413` too large, `429` rate-limited) and the server message.
 
-## Notes are public
+## End-to-end encryption
 
-Anyone with the link can read a note — never publish secrets. Limits:
-100 KB per note, 20 publishes/hour/IP.
+Pass a `password` and the content is encrypted **client-side** (PBKDF2-SHA-256
++ AES-256-GCM) before it leaves your machine — the server only ever stores an
+opaque envelope, byte-compatible with the pst.md web reader.
+
+```ts
+import { createClient, generatePassword } from "pst-md";
+const pst = createClient();
+
+const password = generatePassword();               // or bring your own
+const note = await pst.create("# secret", { password });
+note.unlockUrl;   // https://pst.md/n/<id>#p=<password>  (opens decrypted in-browser)
+
+// Read it back — the password never reaches the server (it's in the # fragment)
+await pst.content(note.id, { password });           // -> "# secret"
+await pst.content(note.id);                          // -> the opaque envelope
+```
+
+Lose the password (and the unlock link) and the note is **unrecoverable** —
+there is no reset. The `#p=` link is a secret: anyone with it can read the note.
+
+## Notes are public by default
+
+A plaintext note is readable by anyone with the link — never publish secrets
+(use encryption above for private content). Limits: 100 KB per note,
+20 publishes/hour/IP.
 
 ## MCP
 

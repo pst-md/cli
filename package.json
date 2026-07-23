@@ -1,7 +1,7 @@
 {
   "name": "pst-md",
-  "version": "0.2.0",
-  "description": "CLI + tiny zero-dependency client for pst.md — publish public markdown notes with instant shareable links; edit/delete via secret editKey. `npx pst-md publish note.md`.",
+  "version": "0.3.0",
+  "description": "CLI + tiny zero-dependency client for pst.md — publish public or end-to-end-encrypted markdown notes with instant shareable links; edit/delete via secret editKey. `npx pst-md publish note.md`.",
   "keywords": [
     "pst.md",
     "markdown",
@@ -9,6 +9,8 @@
     "paste",
     "pastebin",
     "share",
+    "encryption",
+    "end-to-end-encryption",
     "mcp"
   ],
   "license": "MIT",
@@ -39,7 +41,7 @@
     "SKILL.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "sideEffects": false,
   "publishConfig": {

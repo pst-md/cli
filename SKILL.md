@@ -20,13 +20,19 @@ npx pst-md update <id> notes.md --key <editKey>
 npx pst-md delete <id> --key <editKey>         # URL becomes 410 Gone
 npx pst-md publish note.md --expires 1d --burn # lifetime + one-time note
 npx pst-md consume <id>                        # one-time read (ERASES burn notes)
+npx pst-md publish note.md --gen-password      # encrypt E2E, print unlock link
+npx pst-md raw <id> --password P               # decrypt an encrypted note
 npx pst-md appearance                          # valid palette/font/code-theme ids
 ```
 
 - `--json` on any command for structured output; parse `editKey` from
-  `publish` and persist it.
+  `publish` and persist it (encrypted publishes also return `password` and
+  `unlockUrl`).
 - `--key` can come from env `PST_MD_EDIT_KEY`; `--base-url` / `PST_MD_BASE_URL`
   targets another deployment.
+- Encryption is end-to-end: `--password P` (or `--gen-password`) encrypts on
+  publish; the same `--password` decrypts on `raw`/`consume`. The server never
+  sees the password or plaintext — lose it and the note is unrecoverable.
 
 ## Library
 
@@ -35,6 +41,9 @@ import { createClient } from "pst-md";
 const pst = createClient();
 const note = await pst.create("---\ntitle: Hi\npalette: nord\n---\n# hello");
 // options: await pst.create(md, { expiresIn: "1d", burnAfterRead: true })
+// encrypt E2E: await pst.create(md, { password }) -> note.unlockUrl (#p=…)
+//   import { generatePassword } from "pst-md" for a strong one
+//   read back: await pst.content(id, { password }) / pst.consume(id, { password })
 // one-time read (erases burn notes): await pst.consume(id)
 // note.url, note.id, note.editKey (STORE IT)
 await pst.content(note.id);                  // raw markdown

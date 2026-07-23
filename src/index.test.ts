@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createClient, PstError } from "./index";
+import {
+  createClient,
+  decryptEnvelope,
+  encryptEnvelope,
+  generatePassword,
+  isEnvelope,
+  PstError,
+} from "./index";
 
 function mockFetch(status: number, body: unknown, text = false) {
   return vi.fn(async () =>
@@ -47,6 +54,7 @@ describe("PstClient", () => {
       editKey: "k",
       encrypted: false,
       url: "https://pst.md/n/abc",
+      unlockUrl: null,
     });
     const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("https://pst.md/api/notes");
@@ -94,6 +102,34 @@ describe("PstClient", () => {
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(
       "https://pst.md/api/appearance",
     );
+  });
+
+  it("create with a password encrypts, flags encrypted, and returns an unlock link", async () => {
+    const fetch = mockFetch(201, {
+      id: "abc", editKey: "k", encrypted: true, expiresAt: null, burnAfterRead: false,
+    });
+    const pst = createClient({ fetch });
+    const note = await pst.create("# secret", { password: "hunter2" });
+
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.encrypted).toBe(true);
+    expect(body.content).not.toContain("secret"); // ciphertext, not plaintext
+    expect(isEnvelope(body.content)).toBe(true);
+    // The posted envelope decrypts back to the original with the password.
+    await expect(decryptEnvelope("hunter2", body.content)).resolves.toBe("# secret");
+    expect(note.unlockUrl).toBe("https://pst.md/n/abc#p=hunter2");
+  });
+
+  it("content decrypts an encrypted note when given the password", async () => {
+    const envelope = await encryptEnvelope("pw", "# hidden");
+    const fetch = mockFetch(200, envelope, true);
+    const pst = createClient({ fetch });
+    await expect(pst.content("abc", { password: "pw" })).resolves.toBe("# hidden");
+    // Without the password, the raw envelope is returned unchanged.
+    const fetch2 = mockFetch(200, envelope, true);
+    const pst2 = createClient({ fetch: fetch2 });
+    await expect(pst2.content("abc")).resolves.toBe(envelope);
   });
 
   it("respects a custom baseUrl (trailing slash trimmed)", async () => {

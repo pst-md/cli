@@ -7,6 +7,21 @@
  * once and is the only way to update or delete a note — store it.
  */
 
+import {
+  decryptEnvelope,
+  encryptEnvelope,
+  isEnvelope,
+} from "./envelope.js";
+
+export {
+  DecryptError,
+  decryptEnvelope,
+  encryptEnvelope,
+  isEnvelope,
+  parseEnvelope,
+  type EncryptedEnvelope,
+} from "./envelope.js";
+
 /** Note lifetimes accepted at publish. Omit for a note that never expires. */
 export type ExpiresIn = "1h" | "1d" | "1w" | "30d";
 
@@ -16,6 +31,18 @@ export interface CreateOptions {
   expiresIn?: ExpiresIn;
   /** One-time note: self-destructs after the first content read. */
   burnAfterRead?: boolean;
+  /**
+   * Encrypt the content end-to-end with this password before publishing. The
+   * server stores only the opaque envelope; readers need the password (or the
+   * returned {@link CreatedNote.unlockUrl}).
+   */
+  password?: string;
+}
+
+/** Options for reads that may need to decrypt an encrypted note. */
+export interface ReadOptions {
+  /** Password to decrypt an encrypted note's content in place. */
+  password?: string;
 }
 
 /** Result of publishing a note. */
@@ -30,6 +57,12 @@ export interface CreatedNote {
   burnAfterRead: boolean;
   /** Shareable page URL, derived from the client's baseUrl. */
   url: string;
+  /**
+   * Self-unlocking link (`<url>#p=<password>`) for an encrypted note — the
+   * password rides in the URL fragment, which never reaches the server. Null
+   * for a plaintext note.
+   */
+  unlockUrl: string | null;
 }
 
 /** Note metadata (content lives at {@link PstClient.content}). */
@@ -129,15 +162,28 @@ export class PstClient {
    * https://pst.md/skill.md. Options add a lifetime or make it one-time.
    */
   async create(content: string, options: CreateOptions = {}): Promise<CreatedNote> {
-    const created = await this.json<Omit<CreatedNote, "url">>("/api/notes", {
-      method: "POST",
-      body: JSON.stringify({
-        content,
-        ...(options.expiresIn ? { expiresIn: options.expiresIn } : {}),
-        ...(options.burnAfterRead ? { burnAfterRead: true } : {}),
-      }),
-    });
-    return { ...created, url: this.pageUrl(created.id) };
+    const body = options.password
+      ? await encryptEnvelope(options.password, content)
+      : content;
+    const created = await this.json<Omit<CreatedNote, "url" | "unlockUrl">>(
+      "/api/notes",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content: body,
+          ...(options.password ? { encrypted: true } : {}),
+          ...(options.expiresIn ? { expiresIn: options.expiresIn } : {}),
+          ...(options.burnAfterRead ? { burnAfterRead: true } : {}),
+        }),
+      },
+    );
+    return {
+      ...created,
+      url: this.pageUrl(created.id),
+      unlockUrl: options.password
+        ? this.unlockUrl(created.id, options.password)
+        : null,
+    };
   }
 
   /** Fetch note metadata (title, timestamps). 404 unknown / 410 deleted. */
@@ -145,26 +191,39 @@ export class PstClient {
     return this.json<NoteMeta>(`/api/notes/${encodeURIComponent(id)}`);
   }
 
-  /** Fetch the verbatim markdown source (front matter included). */
-  async content(id: string): Promise<string> {
+  /**
+   * Fetch the verbatim markdown source (front matter included). For an
+   * encrypted note this returns the opaque envelope; pass `{ password }` to
+   * decrypt it to plaintext in place.
+   */
+  async content(id: string, options: ReadOptions = {}): Promise<string> {
     const response = await this.fetchImpl(
       `${this.baseUrl}/n/${encodeURIComponent(id)}/raw`,
     );
     if (!response.ok) await fail(response);
-    return response.text();
+    const text = await response.text();
+    if (options.password && isEnvelope(text)) {
+      return decryptEnvelope(options.password, text);
+    }
+    return text;
   }
 
   /**
    * Read a note's content exactly once, CONSUMING it if it is a one-time
    * (burn-after-read) note — the note is erased for everyone afterwards.
    * The only way to read a plaintext burn note programmatically
-   * ({@link content} answers 403 for those).
+   * ({@link content} answers 403 for those). Pass `{ password }` to decrypt an
+   * encrypted note's content.
    */
-  consume(id: string): Promise<ConsumedNote> {
-    return this.json<ConsumedNote>(
+  async consume(id: string, options: ReadOptions = {}): Promise<ConsumedNote> {
+    const note = await this.json<ConsumedNote>(
       `/api/notes/${encodeURIComponent(id)}/consume`,
       { method: "POST" },
     );
+    if (options.password && isEnvelope(note.content)) {
+      return { ...note, content: await decryptEnvelope(options.password, note.content) };
+    }
+    return note;
   }
 
   /** Replace a note's content. Requires the editKey from {@link create}. */
@@ -195,9 +254,33 @@ export class PstClient {
   pageUrl(id: string): string {
     return `${this.baseUrl}/n/${encodeURIComponent(id)}`;
   }
+
+  /**
+   * Self-unlocking link for an encrypted note: the password rides in the URL
+   * fragment (`#p=…`), which the browser never sends to the server. Anyone with
+   * the link can read the note, so treat it as the secret it is.
+   */
+  unlockUrl(id: string, password: string): string {
+    return `${this.pageUrl(id)}#${new URLSearchParams({ p: password }).toString()}`;
+  }
 }
 
 /** Convenience factory: `const pst = createClient();` */
 export function createClient(options?: PstClientOptions): PstClient {
   return new PstClient(options);
+}
+
+// Unambiguous alphabet (no 0/O/1/l/I) — matches the web app's generator.
+const PASSWORD_ALPHABET =
+  "23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/**
+ * A strong random password from a CSPRNG, suitable for encrypting a note.
+ * Default 20 chars (~117 bits over the 55-symbol alphabet).
+ */
+export function generatePassword(length = 20): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  let out = "";
+  for (const byte of bytes) out += PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length];
+  return out;
 }
