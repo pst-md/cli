@@ -1,0 +1,32 @@
+name: Release
+
+# Publishes to npm via OIDC trusted publishing when a version tag is pushed:
+#   git tag v0.4.0 && git push origin v0.4.0
+# Requires the trusted publisher (repo pst-md/cli, workflow release.yml) to be
+# registered in the package's settings on npmjs.com — no tokens involved.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token npm exchanges for publish access
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - run: npm ci
+      - run: npm test
+      - name: Check tag matches package.json version
+        run: |
+          pkg="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          [ "$pkg" = "$tag" ] || { echo "tag v$tag != package.json $pkg"; exit 1; }
+      - run: npm publish
